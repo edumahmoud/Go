@@ -1,0 +1,88 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Employee {
+  id        String   @id @default(cuid())
+  code      String   @unique // Employee code added by admin
+  name      String
+  phone     String?  // Phone linked on first login
+  deviceId  String?  // Device fingerprint linked to phone
+  role      String   @default("EMPLOYEE") // EMPLOYEE | ADMIN
+  isActive  Boolean  @default(true) // Admin can suspend employees
+  password  String?  // Password set on first login
+  lastLat   Float?
+  lastLng   Float?
+  lastPingAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions    Session[]
+  attendances Attendance[]
+  locations   LocationPing[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  employeeId String
+  token      String   @unique
+  deviceInfo String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+}
+
+model Attendance {
+  id              String    @id @default(cuid())
+  employeeId      String
+  date            DateTime  // The calendar day (midnight UTC of that day)
+  checkInTime     DateTime?
+  checkOutTime    DateTime?
+  checkInLat      Float?
+  checkInLng      Float?
+  checkOutLat     Float?
+  checkOutLng     Float?
+  checkInAddress  String?
+  checkOutAddress String?
+  status          String    @default("PENDING") // PENDING | PRESENT | LATE | ABSENT | CHECKED_OUT
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime @updatedAt
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([employeeId, date])
+}
+
+model LocationPing {
+  id         String   @id @default(cuid())
+  employeeId String
+  lat        Float
+  lng        Float
+  timestamp  DateTime @default(now())
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, timestamp])
+}
+
+model ScheduleSetting {
+  id                    String  @id @default(cuid())
+  name                  String  @default("default")
+  checkInTime           String  // "09:00"
+  checkOutTime          String  // "17:00"
+  lateThresholdMinutes  Int     @default(15) // After this many minutes, status = LATE
+  earlyLeaveThresholdMinutes Int @default(15) // Before checkout time, status = EARLY_LEAVE
+  workDays              String  @default("0,1,2,3,4") // Sun=0 ... Sat=6
+  isActive              Boolean @default(true)
+  updatedAt             DateTime @updatedAt
+}
