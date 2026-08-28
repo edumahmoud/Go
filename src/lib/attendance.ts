@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 
-// Get active schedule settings, create default if not exists
+// Get the active schedule, create default if not exists
 export async function getActiveSchedule() {
   let schedule = await db.scheduleSetting.findFirst({
     where: { isActive: true },
@@ -14,7 +14,7 @@ export async function getActiveSchedule() {
         checkOutTime: '17:00',
         lateThresholdMinutes: 15,
         earlyLeaveThresholdMinutes: 15,
-        workDays: '0,1,2,3,4', // Sun-Thu
+        workDays: ['0', '1', '2', '3', '4'],
         isActive: true,
       },
     })
@@ -22,7 +22,7 @@ export async function getActiveSchedule() {
   return schedule
 }
 
-// Get the date for "today" (midnight UTC)
+// Midnight UTC of the given date (or today)
 export function getTodayDate(): Date {
   const now = new Date()
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
@@ -32,15 +32,12 @@ export function getDateFor(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
 }
 
-// Check if a given date is a work day
-export function isWorkDay(date: Date, workDays: string): boolean {
-  // getUTCDay: 0=Sun ... 6=Sat
-  const day = date.getUTCDay()
-  const days = workDays.split(',').map((d) => parseInt(d.trim(), 10))
-  return days.includes(day)
+export function isWorkDay(date: Date, workDays: string[]): boolean {
+  const day = String(date.getUTCDay())
+  return workDays.includes(day)
 }
 
-// Determine attendance status from check-in time vs schedule
+// Determine check-in status vs schedule
 export function computeCheckInStatus(
   checkInTime: Date,
   date: Date,
@@ -73,22 +70,19 @@ export function computeCheckOutStatus(
   return 'CHECKED_OUT'
 }
 
-// Format time to HH:mm
 export function formatTime(date: Date | null | undefined): string {
   if (!date) return '—'
-  return date.toLocaleTimeString('ar-EG', {
+  return new Date(date).toLocaleTimeString('ar-EG', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
   })
 }
 
-// Format date to yyyy-mm-dd
 export function formatDateKey(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
-// Format date to a human-readable Arabic date
 export function formatDateAr(date: Date): string {
   return date.toLocaleDateString('ar-EG', {
     weekday: 'long',

@@ -1,31 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireEmployee, getCurrentEmployee } from '@/lib/auth'
+import { getCurrentEmployee } from '@/lib/auth'
 import { getDateFor } from '@/lib/attendance'
 
 // GET /api/attendance/calendar?month=YYYY-MM&employeeId=...
-// Returns attendance records for a given month for current employee or (admin) any employee
 export async function GET(req: NextRequest) {
-  let me
-  try {
-    me = await requireEmployee()
-  } catch {
-    return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  }
+  const me = await getCurrentEmployee()
+  if (!me) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
-  const monthParam = req.nextUrl.searchParams.get('month') // YYYY-MM
+  const monthParam = req.nextUrl.searchParams.get('month')
   const employeeId = req.nextUrl.searchParams.get('employeeId')
 
   let targetEmployeeId = me.id
   if (employeeId && employeeId !== me.id) {
-    // Only admin can view others
-    if (me.role !== 'ADMIN') {
+    // Only supervisors/managers can view others
+    if (me.role === 'EMPLOYEE') {
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
     }
     targetEmployeeId = employeeId
   }
 
-  // Build date range for the month (UTC)
   let startDate: Date
   let endDate: Date
   if (monthParam) {
@@ -49,27 +43,34 @@ export async function GET(req: NextRequest) {
   const normalized = records.map((r) => ({
     ...r,
     dateKey: r.date.toISOString().slice(0, 10),
+    checkInTime: r.checkIn?.time ?? null,
+    checkOutTime: r.checkOut?.time ?? null,
+    checkInLat: r.checkIn?.lat ?? null,
+    checkInLng: r.checkIn?.lng ?? null,
+    checkOutLat: r.checkOut?.lat ?? null,
+    checkOutLng: r.checkOut?.lng ?? null,
+    checkInAddress: r.checkIn?.address ?? null,
+    checkOutAddress: r.checkOut?.address ?? null,
   }))
 
   return NextResponse.json({ records: normalized })
 }
 
-// POST /api/attendance/calendar - Admin manually creates/updates a record
+// POST /api/attendance/calendar - Admin/Supervisor manually creates/updates a record
 export async function POST(req: NextRequest) {
-  let me
-  try {
-    me = await getCurrentEmployee()
-    if (!me || me.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
-    }
-  } catch {
-    return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+  const me = await getCurrentEmployee()
+  if (!me) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+
+  // Only MANAGER or SUPERVISOR with attendance:edit can edit
+  const allowed = me.role === 'MANAGER' || me.permissions.includes('attendance:edit')
+  if (!allowed) {
+    return NextResponse.json({ error: 'FORBIDDEN — تحتاج صلاحية تعديل الحضور' }, { status: 403 })
   }
 
   const body = await req.json()
   const {
     employeeId,
-    dateKey, // YYYY-MM-DD
+    dateKey,
     checkInTime,
     checkOutTime,
     checkInLat,
@@ -99,25 +100,29 @@ export async function POST(req: NextRequest) {
   const date = getDateFor(new Date(Date.UTC(y, m - 1, d)))
 
   const data: {
-    checkInTime?: Date | null
-    checkOutTime?: Date | null
-    checkInLat?: number | null
-    checkInLng?: number | null
-    checkOutLat?: number | null
-    checkOutLng?: number | null
+    checkIn?: { time: Date; lat: number; lng: number; address?: string } | undefined
+    checkOut?: { time: Date; lat: number; lng: number; address?: string } | undefined
     status?: string
     notes?: string | null
   } = {}
 
   if (checkInTime !== undefined) {
-    data.checkInTime = checkInTime ? new Date(`${dateKey}T${checkInTime}:00Z`) : null
-    data.checkInLat = checkInLat ?? null
-    data.checkInLng = checkInLng ?? null
+    data.checkIn = checkInTime
+      ? {
+          time: new Date(`${dateKey}T${checkInTime}:00Z`),
+          lat: checkInLat ?? 0,
+          lng: checkInLng ?? 0,
+        }
+      : undefined
   }
   if (checkOutTime !== undefined) {
-    data.checkOutTime = checkOutTime ? new Date(`${dateKey}T${checkOutTime}:00Z`) : null
-    data.checkOutLat = checkOutLat ?? null
-    data.checkOutLng = checkOutLng ?? null
+    data.checkOut = checkOutTime
+      ? {
+          time: new Date(`${dateKey}T${checkOutTime}:00Z`),
+          lat: checkOutLat ?? 0,
+          lng: checkOutLng ?? 0,
+        }
+      : undefined
   }
   if (status) data.status = status
   if (notes !== undefined) data.notes = notes || null
@@ -128,8 +133,10 @@ export async function POST(req: NextRequest) {
     create: {
       employeeId,
       date,
-      ...data,
+      checkIn: data.checkIn,
+      checkOut: data.checkOut,
       status: status || (checkInTime ? 'PRESENT' : 'PENDING'),
+      notes: notes || null,
     },
   })
 

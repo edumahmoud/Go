@@ -1,6 +1,8 @@
 import { db } from '@/lib/db'
 import { cookies } from 'next/headers'
 import crypto from 'crypto'
+import type { Role, Permission } from '@/lib/permissions'
+import { hasPermission } from '@/lib/permissions'
 
 export const SESSION_COOKIE = 'attendance_session'
 
@@ -37,7 +39,24 @@ export async function destroySession() {
   cookieStore.delete(SESSION_COOKIE)
 }
 
-export async function getCurrentEmployee() {
+type CurrentEmployee = {
+  id: string
+  code: string
+  name: string
+  phone: string | null
+  role: Role
+  permissions: string[]
+  isActive: boolean
+  hashedPassword: string | null
+  boundDeviceId: string | null
+  lastLat: number | null
+  lastLng: number | null
+  lastPingAt: Date | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+export async function getCurrentEmployee(): Promise<CurrentEmployee | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(SESSION_COOKIE)?.value
   if (!token) return null
@@ -53,7 +72,7 @@ export async function getCurrentEmployee() {
     return null
   }
 
-  return session.employee
+  return session.employee as unknown as CurrentEmployee
 }
 
 export async function requireEmployee() {
@@ -64,15 +83,31 @@ export async function requireEmployee() {
   return employee
 }
 
-export async function requireAdmin() {
+export async function requireRole(minRole: Role) {
   const employee = await getCurrentEmployee()
-  if (!employee || employee.role !== 'ADMIN') {
+  if (!employee) throw new Error('UNAUTHORIZED')
+  const order: Role[] = ['EMPLOYEE', 'SUPERVISOR', 'MANAGER']
+  if (order.indexOf(employee.role) < order.indexOf(minRole)) {
     throw new Error('FORBIDDEN')
   }
   return employee
 }
 
-// Generate a simple device fingerprint from request headers
+export async function requireManager() {
+  return requireRole('MANAGER')
+}
+
+// Require a specific permission; throws FORBIDDEN if missing.
+export async function requirePermission(permission: Permission) {
+  const employee = await getCurrentEmployee()
+  if (!employee) throw new Error('UNAUTHORIZED')
+  if (!hasPermission(employee.role, employee.permissions, permission)) {
+    throw new Error('FORBIDDEN')
+  }
+  return employee
+}
+
+// Generate a stable device fingerprint from request headers + UA
 export function getDeviceId(headers: Headers): string {
   const ua = headers.get('user-agent') || ''
   const lang = headers.get('accept-language') || ''
@@ -80,11 +115,28 @@ export function getDeviceId(headers: Headers): string {
   return crypto.createHash('sha256').update(`${ua}|${lang}|${enc}`).digest('hex')
 }
 
-// Hash a password using SHA-256 (simple, but sufficient for demo)
 export function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex')
+  // Salted hash for stronger security
+  const salt = crypto.createHash('sha256').update('attendance_app_salt_v1').digest('hex')
+  return crypto.createHash('sha256').update(salt + password).digest('hex')
 }
 
 export function verifyPassword(password: string, hash: string): boolean {
   return hashPassword(password) === hash
+}
+
+// Record an audit log entry (best-effort, never throws)
+export async function logAction(params: {
+  actorId?: string
+  actorCode?: string
+  action: string
+  targetType?: string
+  targetId?: string
+  details?: string
+}) {
+  try {
+    await db.auditLog.create({ data: params })
+  } catch {
+    // ignore
+  }
 }

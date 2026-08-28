@@ -1,27 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireAdmin } from '@/lib/auth'
+import { getCurrentEmployee, logAction } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 
-// GET /api/schedule - Get current schedule (any logged-in user)
+// GET /api/schedule - Get current schedule
 export async function GET() {
-  try {
-    await requireAdmin()
-  } catch {
-    return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
-  }
-
+  const me = await getCurrentEmployee()
+  if (!me) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+  // Anyone logged-in can view the schedule
   const schedules = await db.scheduleSetting.findMany({
     orderBy: { createdAt: 'desc' },
   })
   return NextResponse.json({ schedules })
 }
 
-// PUT /api/schedule - Update schedule (admin only)
+// PUT /api/schedule - Update schedule (requires schedule:edit)
 export async function PUT(req: NextRequest) {
-  try {
-    await requireAdmin()
-  } catch {
-    return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+  const me = await getCurrentEmployee()
+  if (!me) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+  if (!hasPermission(me.role, me.permissions, 'schedule:edit')) {
+    return NextResponse.json({ error: 'FORBIDDEN — تحتاج صلاحية تعديل المواعيد' }, { status: 403 })
   }
 
   const body = await req.json()
@@ -38,10 +36,9 @@ export async function PUT(req: NextRequest) {
     checkOutTime?: string
     lateThresholdMinutes?: number
     earlyLeaveThresholdMinutes?: number
-    workDays?: string
+    workDays?: string[]
   }
 
-  // Find the active schedule (or first one)
   let schedule = await db.scheduleSetting.findFirst({ where: { isActive: true } })
   if (!schedule) {
     schedule = await db.scheduleSetting.create({
@@ -51,7 +48,7 @@ export async function PUT(req: NextRequest) {
         checkOutTime: '17:00',
         lateThresholdMinutes: 15,
         earlyLeaveThresholdMinutes: 15,
-        workDays: '0,1,2,3,4',
+        workDays: ['0', '1', '2', '3', '4'],
         isActive: true,
       },
     })
@@ -67,6 +64,12 @@ export async function PUT(req: NextRequest) {
       ...(earlyLeaveThresholdMinutes !== undefined ? { earlyLeaveThresholdMinutes } : {}),
       ...(workDays !== undefined ? { workDays } : {}),
     },
+  })
+
+  await logAction({
+    actorId: me.id, actorCode: me.code, action: 'SCHEDULE_UPDATE',
+    targetType: 'SCHEDULE', targetId: targetId,
+    details: `Schedule updated by ${me.code}`,
   })
 
   return NextResponse.json({ schedule: updated })

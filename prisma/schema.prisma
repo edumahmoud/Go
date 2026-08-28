@@ -1,38 +1,59 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Prisma schema for MongoDB (NoSQL) — Attendance Tracking System
+// Each model represents a MongoDB collection with documents.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["mongodb"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "mongodb"
+  url      = "mongodb://127.0.0.1:27017/attendance_db?replicaSet=rs0"
 }
 
+// =========================================================
+// Employee (collection: employees)
+// =========================================================
+// One document per employee. Includes:
+//  - Authentication (code + hashedPassword + boundDeviceId)
+//  - Role (EMPLOYEE | SUPERVISOR | MANAGER)
+//  - Permissions array (granular permissions, granted by MANAGER)
+//  - Live location (lastLat, lastLng, lastPingAt)
+//  - isActive flag (admin can suspend without deleting)
 model Employee {
-  id        String   @id @default(cuid())
-  code      String   @unique // Employee code added by admin
-  name      String
-  phone     String?  // Phone linked on first login
-  deviceId  String?  // Device fingerprint linked to phone
-  role      String   @default("EMPLOYEE") // EMPLOYEE | ADMIN
-  isActive  Boolean  @default(true) // Admin can suspend employees
-  password  String?  // Password set on first login
-  lastLat   Float?
-  lastLng   Float?
-  lastPingAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  code         String   @unique // employee code, e.g. EMP001
+  name         String
+  phone        String?
+  // Authentication
+  hashedPassword String? // null on first login attempt = system invites them to set a password
+  boundDeviceId  String? // null = no device bound yet (first login binds it)
+  // Authorization
+  role         Role     @default(EMPLOYEE)
+  permissions  String[] @default([])
+  isActive     Boolean  @default(true)
+  // Live location tracking
+  lastLat      Float?
+  lastLng      Float?
+  lastPingAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   sessions    Session[]
   attendances Attendance[]
-  locations   LocationPing[]
+  pings       LocationPing[]
+
+  @@index([role])
+  @@index([isActive])
 }
 
+// =========================================================
+// Session (collection: sessions)
+// =========================================================
+// A session token = a logged-in device. Multiple sessions per employee allowed.
 model Session {
-  id         String   @id @default(cuid())
-  employeeId String
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId String   @db.ObjectId
   token      String   @unique
   deviceInfo String?
   expiresAt  DateTime
@@ -40,49 +61,120 @@ model Session {
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
+  @@index([expiresAt])
 }
 
+// =========================================================
+// Attendance (collection: attendances)
+// =========================================================
+// One document per (employee, day). Stores check-in and check-out
+// together so a single query returns the whole day's record.
 model Attendance {
-  id              String    @id @default(cuid())
-  employeeId      String
-  date            DateTime  // The calendar day (midnight UTC of that day)
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId      String   @db.ObjectId
+  date            DateTime // midnight UTC of the day
   checkInTime     DateTime?
   checkOutTime    DateTime?
-  checkInLat      Float?
-  checkInLng      Float?
-  checkOutLat     Float?
-  checkOutLng     Float?
-  checkInAddress  String?
-  checkOutAddress String?
-  status          String    @default("PENDING") // PENDING | PRESENT | LATE | ABSENT | CHECKED_OUT
+  // Coordinates + reverse-geocoded address
+  checkIn         CheckInOut?
+  checkOut        CheckInOut?
+  // Derived status: PENDING | PRESENT | LATE | EARLY_LEAVE | CHECKED_OUT | LATE_CHECKED_OUT | OFF_DAY_PRESENT | ...
+  status          String   @default("PENDING")
   notes           String?
-  createdAt       DateTime  @default(now())
+  createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, date])
-  @@index([employeeId, date])
+  @@index([date])
+  @@index([status])
 }
 
+// Embedded sub-document for check-in / check-out data
+type CheckInOut {
+  time    DateTime
+  lat     Float
+  lng     Float
+  address String?
+}
+
+// =========================================================
+// LocationPing (collection: locationpings)
+// =========================================================
+// Append-only log of every location update received from employees.
+// Used for live tracking and historical playback.
 model LocationPing {
-  id         String   @id @default(cuid())
-  employeeId String
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId String   @db.ObjectId
   lat        Float
   lng        Float
+  accuracy   Float?
   timestamp  DateTime @default(now())
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId, timestamp])
+  @@index([timestamp])
 }
 
+// =========================================================
+// ScheduleSetting (collection: schedulesettings)
+// =========================================================
+// Work schedule config: check-in time, check-out time, late threshold, work days.
 model ScheduleSetting {
-  id                    String  @id @default(cuid())
-  name                  String  @default("default")
-  checkInTime           String  // "09:00"
-  checkOutTime          String  // "17:00"
-  lateThresholdMinutes  Int     @default(15) // After this many minutes, status = LATE
-  earlyLeaveThresholdMinutes Int @default(15) // Before checkout time, status = EARLY_LEAVE
-  workDays              String  @default("0,1,2,3,4") // Sun=0 ... Sat=6
-  isActive              Boolean @default(true)
-  updatedAt             DateTime @updatedAt
+  id                       String   @id @default(auto()) @map("_id") @db.ObjectId
+  name                     String   @unique
+  checkInTime              String   // "09:00"
+  checkOutTime             String   // "17:00"
+  lateThresholdMinutes     Int      @default(15)
+  earlyLeaveThresholdMinutes Int    @default(15)
+  workDays                 String[] @default(["0", "1", "2", "3", "4"]) // Sun=0..Sat=6
+  isActive                 Boolean  @default(true)
+  updatedAt                DateTime @updatedAt
+
+  @@index([isActive])
 }
+
+// =========================================================
+// AuditLog (collection: auditlogs)
+// =========================================================
+// Records every admin/supervisor action for accountability.
+model AuditLog {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  actorId    String?   @db.ObjectId
+  actorCode  String?
+  action     String   // PROMOTE | DEMOTE | GRANT_PERMISSION | REVOKE_PERMISSION | SUSPEND | ACTIVATE | DELETE_EMPLOYEE | SCHEDULE_UPDATE | ...
+  targetType String?  // EMPLOYEE | SCHEDULE | ATTENDANCE
+  targetId   String?  @db.ObjectId
+  details    String?
+  timestamp  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([timestamp])
+}
+
+// =========================================================
+// Roles & Permissions
+// =========================================================
+enum Role {
+  EMPLOYEE     // regular employee: only check-in/out for self, view own calendar
+  SUPERVISOR   // limited admin: view dashboard, view employees, view calendar of all
+  MANAGER      // full admin: all permissions + manage supervisors + manage permissions
+}
+
+// Available permissions (stored as strings on Employee.permissions):
+// - dashboard:view
+// - employees:view
+// - employees:create
+// - employees:edit
+// - employees:delete
+// - employees:suspend
+// - employees:reset_device
+// - employees:reset_password
+// - employees:promote        // promote employee to supervisor (MANAGER only)
+// - employees:demote
+// - permissions:manage      // grant/revoke permissions for supervisors (MANAGER only)
+// - attendance:edit         // manually edit attendance records
+// - schedule:edit           // edit work schedule
+// - locations:view          // view live locations of all employees
+// - auditlog:view           // view audit log

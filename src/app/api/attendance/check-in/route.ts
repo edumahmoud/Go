@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireEmployee } from '@/lib/auth'
+import { getCurrentEmployee, logAction } from '@/lib/auth'
 import {
   getActiveSchedule,
   getTodayDate,
@@ -12,12 +12,8 @@ import { reverseGeocode } from '@/lib/geo'
 // POST /api/attendance/check-in
 // Body: { lat, lng }
 export async function POST(req: NextRequest) {
-  let employee
-  try {
-    employee = await requireEmployee()
-  } catch {
-    return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  }
+  const employee = await getCurrentEmployee()
+  if (!employee) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
   if (!employee.isActive) {
     return NextResponse.json(
@@ -38,8 +34,6 @@ export async function POST(req: NextRequest) {
 
   const schedule = await getActiveSchedule()
   const today = getTodayDate()
-
-  // Allow check-in even on non-work days, but flag it
   const workDay = isWorkDay(today, schedule.workDays)
 
   // Find or create today's attendance record
@@ -49,7 +43,7 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  if (attendance && attendance.checkInTime) {
+  if (attendance && attendance.checkIn?.time) {
     return NextResponse.json(
       { error: 'تم تسجيل الحضور مسبقاً اليوم' },
       { status: 409 }
@@ -59,15 +53,13 @@ export async function POST(req: NextRequest) {
   const now = new Date()
   const status = computeCheckInStatus(now, today, schedule)
   const address = await reverseGeocode(lat, lng)
+  const checkIn = { time: now, lat, lng, address }
 
   if (attendance) {
     attendance = await db.attendance.update({
       where: { id: attendance.id },
       data: {
-        checkInTime: now,
-        checkInLat: lat,
-        checkInLng: lng,
-        checkInAddress: address,
+        checkIn,
         status: workDay ? status : status + '_OFF_DAY',
       },
     })
@@ -76,20 +68,44 @@ export async function POST(req: NextRequest) {
       data: {
         employeeId: employee.id,
         date: today,
-        checkInTime: now,
-        checkInLat: lat,
-        checkInLng: lng,
-        checkInAddress: address,
+        checkIn,
         status: workDay ? status : status + '_OFF_DAY',
       },
     })
   }
 
-  // Also update employee's last known location
+  // Update employee's live location
   await db.employee.update({
     where: { id: employee.id },
     data: { lastLat: lat, lastLng: lng, lastPingAt: now },
   })
+
+  await logAction({
+    actorId: employee.id, actorCode: employee.code, action: 'CHECK_IN',
+    targetType: 'ATTENDANCE', targetId: attendance.id,
+    details: `${employee.code} checked in at (${lat}, ${lng})`,
+  })
+
+  // Real-time notification to manager dashboards
+  try {
+    await fetch('http://127.0.0.1:3004/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'attendance:check-in',
+        payload: {
+          employeeId: employee.id,
+          code: employee.code,
+          name: employee.name,
+          checkInTime: now.toISOString(),
+          lat, lng,
+          status: attendance.status,
+        },
+      }),
+    })
+  } catch {
+    // ignore
+  }
 
   return NextResponse.json({
     attendance,
