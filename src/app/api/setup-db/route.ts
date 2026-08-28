@@ -1,23 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { PrismaClient } from '@prisma/client'
+import { getMongoClient } from '@/lib/mongo'
 import crypto from 'crypto'
 
 // POST /api/setup-db
 // One-time setup endpoint that:
-// 1. Tests connection to MongoDB Atlas with the provided URL
+// 1. Tests connection to MongoDB Atlas (fast — uses native driver)
 // 2. Creates the default admin (ADMIN001 / admin123) if missing
 // 3. Creates a default work schedule if missing
 //
 // Body: { "databaseUrl": "mongodb+srv://user:pass@cluster.../attendance_db?..." }
 //
-// NOTE: Vercel has a default 10s timeout for serverless functions.
-// We keep this endpoint minimal and fast:
-//   - Test connection (1s)
-//   - Create admin (1-2s)
-//   - Create schedule (1s)
-// Total: ~3-5s, well within Vercel's default.
+// Uses MongoDB native driver directly — much faster than Prisma's cold start.
+// Total time: 1-3s (vs 10-15s with Prisma), well within Vercel's 10s limit.
 
-// Use `export const maxDuration` to extend Vercel function timeout
 export const maxDuration = 30
 
 const ALL_PERMISSIONS = [
@@ -64,70 +59,58 @@ export async function POST(req: NextRequest) {
 
   const maskedUrl = databaseUrl.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@')
 
-  // Create a fresh PrismaClient with the provided URL
-  let prisma: PrismaClient
   try {
-    prisma = new PrismaClient({
-      datasources: { db: { url: databaseUrl } },
-      log: ['error'],
-    })
-  } catch (e) {
-    return NextResponse.json(
-      { error: 'فشل إنشاء Prisma client', details: e instanceof Error ? e.message : String(e) },
-      { status: 500 }
-    )
-  }
+    // Use MongoDB native driver (fast — no Prisma cold start)
+    const { db } = await getMongoClient(databaseUrl)
 
-  try {
-    // 1. Connect (with timeout)
-    await Promise.race([
-      prisma.$connect(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('انتهت مهلة الاتصال (10 ثواني) — تأكد أن IP 0.0.0.0/0 مسموح في MongoDB Atlas Network Access')), 10000)),
-    ])
-
-    // 2. Create default schedule (fast, single insert)
-    const existingSchedule = await prisma.scheduleSetting.findFirst({ where: { isActive: true } })
+    // 1. Create default schedule if missing
+    const existingSchedule = await db.collection('schedulesettings').findOne({ isActive: true })
     let scheduleCreated = false
     if (!existingSchedule) {
-      await prisma.scheduleSetting.create({
-        data: {
-          name: 'default',
-          checkInTime: '09:00',
-          checkOutTime: '17:00',
-          lateThresholdMinutes: 15,
-          earlyLeaveThresholdMinutes: 15,
-          workDays: ['0', '1', '2', '3', '4'],
-          isActive: true,
-        },
+      await db.collection('schedulesettings').insertOne({
+        name: 'default',
+        checkInTime: '09:00',
+        checkOutTime: '17:00',
+        lateThresholdMinutes: 15,
+        earlyLeaveThresholdMinutes: 15,
+        workDays: ['0', '1', '2', '3', '4'],
+        isActive: true,
+        updatedAt: new Date(),
       })
       scheduleCreated = true
     }
 
-    // 3. Create default admin if missing
-    const existing = await prisma.employee.findUnique({ where: { code: 'ADMIN001' } })
+    // 2. Create default admin if missing
+    const existing = await db.collection('employees').findOne({ code: 'ADMIN001' })
     let adminCreated = false
     let adminInfo: { code: string; name: string; role: string } | null = null
 
     if (existing) {
-      adminInfo = { code: existing.code, name: existing.name, role: existing.role }
+      adminInfo = {
+        code: existing.code,
+        name: existing.name,
+        role: existing.role,
+      }
     } else {
-      const admin = await prisma.employee.create({
-        data: {
-          code: 'ADMIN001',
-          name: 'مدير النظام',
-          phone: '01000000000',
-          hashedPassword: hashPassword('admin123'),
-          boundDeviceId: null,
-          role: 'MANAGER',
-          permissions: ALL_PERMISSIONS,
-          isActive: true,
-        },
+      const result = await db.collection('employees').insertOne({
+        code: 'ADMIN001',
+        name: 'مدير النظام',
+        phone: '01000000000',
+        hashedPassword: hashPassword('admin123'),
+        boundDeviceId: null,
+        role: 'MANAGER',
+        permissions: ALL_PERMISSIONS,
+        isActive: true,
+        lastLat: null,
+        lastLng: null,
+        lastPingAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       })
       adminCreated = true
-      adminInfo = { code: admin.code, name: admin.name, role: admin.role }
+      adminInfo = { code: 'ADMIN001', name: 'مدير النظام', role: 'MANAGER' }
     }
 
-    await prisma.$disconnect()
     const elapsedMs = Date.now() - startTime
 
     return NextResponse.json({
@@ -149,7 +132,6 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (e) {
-    await prisma.$disconnect().catch(() => {})
     const elapsedMs = Date.now() - startTime
     const errorMessage = e instanceof Error ? e.message : String(e)
     return NextResponse.json(

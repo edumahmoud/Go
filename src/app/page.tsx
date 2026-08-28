@@ -425,6 +425,15 @@ function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void 
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<unknown>(null)
   const [error, setError] = useState('')
+  const [envStatus, setEnvStatus] = useState<unknown>(null)
+
+  // Check if Vercel env var is already set (uses fast endpoint, no DB call)
+  useEffect(() => {
+    fetch('/api/health-simple', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => setEnvStatus(data))
+      .catch(() => {})
+  }, [])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -437,7 +446,7 @@ function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ databaseUrl: dbUrl.trim() }),
       })
-      const data = await res.json().catch(() => ({ error: 'استجابة غير صالحة' }))
+      const data = await res.json().catch(() => ({ error: 'استجابة غير صالحة (قد يكون الـ server قد تجمد)' }))
       setResult({ httpStatus: res.status, data })
       if (res.ok && data.success) {
         toast.success('تم إعداد قاعدة البيانات بنجاح!', {
@@ -446,7 +455,7 @@ function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void 
         })
         setTimeout(() => onSetupComplete(), 2500)
       } else {
-        setError(data.error || `فشل الإعداد (HTTP ${res.status})`)
+        setError(data.error || data.details || `فشل الإعداد (HTTP ${res.status})`)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -471,6 +480,18 @@ function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void 
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Env var status indicator */}
+          {envStatus && (
+            <div className={`rounded-lg p-3 text-sm ${(envStatus as { status: string }).status === 'ok' ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300'}`}>
+              <div className="font-medium mb-1">
+                {(envStatus as { status: string }).status === 'ok' ? '✅ DATABASE_URL مضبوط في Vercel' : '⚠️ DATABASE_URL غير مضبوط'}
+              </div>
+              <div className="text-xs">
+                {(envStatus as { urlValidation?: { hint?: string } }).urlValidation?.hint}
+              </div>
+            </div>
+          )}
+
           {/* Instructions */}
           <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm">
             <p className="font-medium">📋 الخطوات:</p>
@@ -480,7 +501,7 @@ function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void 
               <li>من <b>Database Access</b>: أنشئ user باسم وكلمة مرور</li>
               <li>من <b>Network Access</b>: اختر <code className="bg-background px-1 rounded">Allow Access From Anywhere</code></li>
               <li>من <b>Database → Connect → Drivers</b>: انسخ connection string</li>
-              <li>استبدل <code className="bg-background px-1 rounded">&lt;password&gt;</code> بكلمة المرور الحقيقية</li>
+              <li>استبدل <code className="bg-background px-1 rounded">&lt;db_password&gt;</code> بكلمة المرور الحقيقية</li>
               <li>أضف <code className="bg-background px-1 rounded">/attendance_db</code> قبل <code className="bg-background px-1 rounded">?</code> في الـ URL</li>
             </ol>
           </div>

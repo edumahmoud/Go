@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { getMongoClient } from '@/lib/mongo'
 
 // Extend Vercel function timeout for MongoDB Atlas cold starts
 export const maxDuration = 15
 
-// GET /api/health — Diagnostics endpoint (no auth required)
+// GET /api/health — Fast diagnostics endpoint (no Prisma, no auth)
+// Uses MongoDB native driver directly for faster cold start.
 // Returns DB connection status, env vars presence, and timing.
 export async function GET() {
+  const startTime = Date.now()
   const diagnostics: {
     status: 'ok' | 'error'
     timestamp: string
@@ -17,6 +19,7 @@ export async function GET() {
       error?: string
       latencyMs?: number
       collections?: string[]
+      employeeCount?: number
     }
   } = {
     status: 'ok',
@@ -29,28 +32,45 @@ export async function GET() {
     db: { connected: false },
   }
 
-  // Test DB connection
-  const start = Date.now()
+  // Quick env var check (no DB call) — useful when DATABASE_URL is missing
+  if (!process.env.DATABASE_URL) {
+    diagnostics.db.error = 'DATABASE_URL is not set'
+    diagnostics.status = 'error'
+    return NextResponse.json(diagnostics, { status: 500 })
+  }
+
+  if (!process.env.DATABASE_URL.startsWith('mongodb')) {
+    diagnostics.db.error = `DATABASE_URL must start with 'mongodb' or 'mongodb+srv'`
+    diagnostics.status = 'error'
+    return NextResponse.json(diagnostics, { status: 500 })
+  }
+
+  // Try MongoDB native driver connection (much faster than Prisma cold start)
   try {
-    if (!process.env.DATABASE_URL) {
-      diagnostics.db.error = 'DATABASE_URL is not set'
-      diagnostics.status = 'error'
-    } else if (!process.env.DATABASE_URL.startsWith('mongodb')) {
-      diagnostics.db.error = `DATABASE_URL must start with 'mongodb' or 'mongodb+srv' — got: ${process.env.DATABASE_URL.slice(0, 30)}...`
-      diagnostics.status = 'error'
-    } else {
-      // Try a simple count operation
-      const count = await db.employee.count()
-      diagnostics.db.connected = true
-      diagnostics.db.latencyMs = Date.now() - start
-      diagnostics.db.collections = ['employees', 'sessions', 'attendances', 'locationpings', 'schedulesettings', 'auditlogs']
-      // Include employee count for sanity check
-      ;(diagnostics as Record<string, unknown>).employeeCount = count
+    const { db } = await getMongoClient()
+    diagnostics.db.connected = true
+    diagnostics.db.latencyMs = Date.now() - startTime
+
+    // Quick count of employees
+    try {
+      const employeeCount = await db.collection('employees').countDocuments()
+      diagnostics.db.employeeCount = employeeCount
+    } catch {
+      // Collection might not exist yet — that's fine
+      diagnostics.db.employeeCount = 0
+    }
+
+    // List collections (best-effort)
+    try {
+      const collections = await db.listCollections().toArray()
+      diagnostics.db.collections = collections.map((c) => c.name)
+    } catch {
+      diagnostics.db.collections = []
     }
   } catch (e) {
     diagnostics.db.connected = false
     diagnostics.db.error = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
-    diagnostics.db.latencyMs = Date.now() - start
+    diagnostics.db.latencyMs = Date.now() - startTime
     diagnostics.status = 'error'
   }
 
