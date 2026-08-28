@@ -52,3 +52,33 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# MongoDB data & binaries (downloaded at runtime, not part of source)
+/.mongodb/
+/.logs/
+
+# SQLite legacy db (if any)
+/db/*.db
+/db/*.db-journal
+
+# Realtime mini-service runtime files
+/mini-services/**/node_modules
+
+# Downloaded binaries
+/tmp/
+
+# Build artifacts
+*.tar
+
+# IDE / OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+
+# Keep scripts and source directories tracked
+!scripts/
+!mini-services/realtime-service/package.json
+!mini-services/realtime-service/index.ts
+!mini-services/realtime-service/start.sh
