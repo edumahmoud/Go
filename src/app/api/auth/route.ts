@@ -9,6 +9,9 @@ import {
 } from '@/lib/auth'
 import { ROLE_DEFAULT_PERMISSIONS } from '@/lib/permissions'
 
+// Extend Vercel function timeout for MongoDB Atlas cold starts
+export const maxDuration = 30
+
 // GET /api/auth - Get current logged-in employee
 export async function GET() {
   const employee = await getCurrentEmployee()

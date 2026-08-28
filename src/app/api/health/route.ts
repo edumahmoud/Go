@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
+// Extend Vercel function timeout for MongoDB Atlas cold starts
+export const maxDuration = 15
+
 // GET /api/health — Diagnostics endpoint (no auth required)
 // Returns DB connection status, env vars presence, and timing.
 export async function GET() {

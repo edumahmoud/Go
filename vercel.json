@@ -4,10 +4,42 @@
   "buildCommand": "bun run build",
   "installCommand": "bun install",
   "functions": {
-    "src/app/api/**/route.ts": {
+    "src/app/api/setup-db/route.ts": {
       "maxDuration": 30
+    },
+    "src/app/api/health/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/auth/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/attendance/check-in/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/attendance/check-out/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/attendance/today/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/attendance/calendar/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/location/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/dashboard/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/employees/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/schedule/route.ts": {
+      "maxDuration": 15
+    },
+    "src/app/api/audit-log/route.ts": {
+      "maxDuration": 15
     }
   },
-  "regions": ["sin1"],
-  "crons": []
+  "regions": ["sin1"]
 }
