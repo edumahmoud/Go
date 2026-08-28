@@ -117,9 +117,19 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const employee = await db.employee.findUnique({
-    where: { code: code.trim() },
-  })
+  let employee
+  try {
+    employee = await db.employee.findUnique({
+      where: { code: code.trim() },
+    })
+  } catch (dbErr) {
+    console.error('[auth] DB error during login:', dbErr)
+    const msg = dbErr instanceof Error ? dbErr.message : 'خطأ غير معروف'
+    return NextResponse.json(
+      { error: `تعذر الاتصال بقاعدة البيانات: ${msg}` },
+      { status: 500 }
+    )
+  }
 
   if (!employee) {
     return NextResponse.json({ error: 'كود الموظف غير موجود' }, { status: 404 })

@@ -291,9 +291,16 @@ function LoginScreen({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const data = await res.json()
+      // Try to parse JSON; if not JSON (e.g. HTML error page), give clearer message
+      let data: { error?: string; employee?: { id: string; code: string; name: string; role: string; permissions?: string[] }; isFirstUser?: boolean; firstLogin?: boolean }
+      try {
+        data = await res.json()
+      } catch {
+        setError(`استجابة غير صالحة من الخادم (HTTP ${res.status}). قد تكون قاعدة البيانات غير مهيأة.`)
+        return
+      }
       if (!res.ok) {
-        setError(data.error || 'فشل العملية')
+        setError(data.error || `فشل العملية (HTTP ${res.status})`)
         return
       }
       onLogin({
@@ -389,15 +396,68 @@ function LoginScreen({
             </Button>
           </form>
         </CardContent>
-        {!systemFresh && (
-          <CardFooter className="justify-center">
+        <CardFooter className="flex-col gap-2 justify-center">
+          <HealthCheckButton />
+          {!systemFresh && (
             <p className="text-xs text-muted-foreground text-center">
               عند أول تسجيل دخول سيتم ربط حسابك بهذا الجهاز.
             </p>
-          </CardFooter>
-        )}
+          )}
+        </CardFooter>
       </Card>
     </div>
+  )
+}
+
+/* -------- Health Check Button (diagnostics for production debugging) -------- */
+function HealthCheckButton() {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<unknown>(null)
+
+  const check = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store' })
+      const data = await res.json().catch(() => ({ error: 'Invalid JSON' }))
+      setResult({ httpStatus: res.status, data })
+    } catch (e) {
+      setResult({ error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setLoading(false)
+      setOpen(true)
+    }
+  }
+
+  return (
+    <>
+      <Button type="button" variant="ghost" size="sm" onClick={check} disabled={loading}>
+        {loading ? <Loader2 className="w-3 h-3 animate-spin ml-1" /> : <Navigation className="w-3 h-3 ml-1" />}
+        فحص حالة النظام
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>تشخيص حالة النظام</DialogTitle>
+            <DialogDescription>
+              يعرض هذا المتغيرات البيئية وحالة الاتصال بقاعدة البيانات
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto whitespace-pre-wrap break-all" dir="ltr">
+            {JSON.stringify(result, null, 2)}
+          </pre>
+          <div className="text-xs text-muted-foreground space-y-1">
+            <p>إذا كان <code>db.connected</code> = <code>false</code>:</p>
+            <ul className="list-disc list-inside mr-4 space-y-1">
+              <li>تأكد أن <code>DATABASE_URL</code> مضبوط في Vercel Environment Variables</li>
+              <li>تأكد أن MongoDB Atlas يسمح بـ IP <code>0.0.0.0/0</code></li>
+              <li>تأكد أن كلمة المرور في الـ URL صحيحة</li>
+              <li>شغّل <code>node scripts/seed-admin.js</code> بعد ضبط DATABASE_URL</li>
+            </ul>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
