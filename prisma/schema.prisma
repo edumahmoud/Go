@@ -8,7 +8,7 @@ generator client {
 
 datasource db {
   provider = "mongodb"
-  url      = "mongodb://127.0.0.1:27017/attendance_db?replicaSet=rs0"
+  url      = env("DATABASE_URL")
 }
 
 // =========================================================

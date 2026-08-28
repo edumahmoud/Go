@@ -8,6 +8,7 @@ import {
   computeCheckInStatus,
 } from '@/lib/attendance'
 import { reverseGeocode } from '@/lib/geo'
+import { broadcastEvent } from '@/lib/broadcast'
 
 // POST /api/attendance/check-in
 // Body: { lat, lng }
@@ -86,26 +87,15 @@ export async function POST(req: NextRequest) {
     details: `${employee.code} checked in at (${lat}, ${lng})`,
   })
 
-  // Real-time notification to manager dashboards
-  try {
-    await fetch('http://127.0.0.1:3004/broadcast', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event: 'attendance:check-in',
-        payload: {
-          employeeId: employee.id,
-          code: employee.code,
-          name: employee.name,
-          checkInTime: now.toISOString(),
-          lat, lng,
-          status: attendance.status,
-        },
-      }),
-    })
-  } catch {
-    // ignore
-  }
+  // Real-time notification to manager dashboards (no-op in production)
+  await broadcastEvent('attendance:check-in', {
+    employeeId: employee.id,
+    code: employee.code,
+    name: employee.name,
+    checkInTime: now.toISOString(),
+    lat, lng,
+    status: attendance.status,
+  })
 
   return NextResponse.json({
     attendance,

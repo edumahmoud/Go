@@ -765,11 +765,14 @@ function AdminOverview({ user }: { user: Employee }) {
 
   useEffect(() => {
     load()
-    const t = setInterval(load, 15_000) // poll dashboard every 15s as backup
+    // In production (Vercel), WebSocket is disabled → poll faster (8s).
+    // In dev, WebSocket handles updates → poll every 15s as backup.
+    const intervalMs = process.env.NODE_ENV === 'production' ? 8_000 : 15_000
+    const t = setInterval(load, intervalMs)
     return () => clearInterval(t)
   }, [load])
 
-  // Listen for real-time updates via WebSocket
+  // Listen for real-time updates via WebSocket (skipped in production)
   useEffect(() => {
     const sock = getRealtimeSocket()
     if (!sock) return
