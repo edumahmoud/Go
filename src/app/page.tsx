@@ -421,19 +421,199 @@ function LoginScreen({
 
 /* -------- Database Setup Screen (shown when DATABASE_URL is missing) -------- */
 function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void }) {
+  const [method, setMethod] = useState<'data-api' | 'driver'>('data-api')
+
+  return (
+    <div className="max-w-2xl mx-auto pt-2">
+      <Card className="shadow-xl border-amber-500/30">
+        <CardHeader className="text-center space-y-3 pb-4">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center">
+            <Database className="w-8 h-8 text-amber-600" />
+          </div>
+          <div>
+            <CardTitle className="text-2xl">إعداد قاعدة البيانات</CardTitle>
+            <CardDescription className="mt-1">
+              اختر طريقة الاتصال بقاعدة بيانات MongoDB
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={method} onValueChange={(v) => setMethod(v as 'data-api' | 'driver')}>
+            <TabsList className="grid grid-cols-2 w-full mb-4">
+              <TabsTrigger value="data-api">
+                <span className="text-xs sm:text-sm">🌐 Data API (موصى به)</span>
+              </TabsTrigger>
+              <TabsTrigger value="driver">
+                <span className="text-xs sm:text-sm">🔌 Driver</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="data-api">
+              <DataApiSetupForm onSetupComplete={onSetupComplete} />
+            </TabsContent>
+            <TabsContent value="driver">
+              <DriverSetupForm onSetupComplete={onSetupComplete} />
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+        <CardFooter className="justify-center">
+          <Button variant="ghost" size="sm" onClick={onSetupComplete}>
+            تخطي (سجّل الدخول فقط)
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
+  )
+}
+
+/* -------- Data API Setup Form (the recommended, problem-free method) -------- */
+function DataApiSetupForm({ onSetupComplete }: { onSetupComplete: () => void }) {
+  const [apiUrl, setApiUrl] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [dataSource, setDataSource] = useState('Cluster0')
+  const [database, setDatabase] = useState('attendance_db')
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<unknown>(null)
+  const [error, setError] = useState('')
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    setResult(null)
+    try {
+      const res = await fetch('/api/setup-data-api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiUrl: apiUrl.trim(),
+          apiKey: apiKey.trim(),
+          dataSource: dataSource.trim() || 'Cluster0',
+          database: database.trim() || 'attendance_db',
+        }),
+      })
+      const data = await res.json().catch(() => ({ error: 'استجابة غير صالحة' }))
+      setResult({ httpStatus: res.status, data })
+      if (res.ok && data.success) {
+        toast.success('تم إعداد قاعدة البيانات بنجاح!', {
+          description: 'يمكنك الآن تسجيل الدخول بـ ADMIN001 / admin123',
+          duration: 8000,
+        })
+        setTimeout(() => onSetupComplete(), 3000)
+      } else {
+        setError(data.error || `فشل الإعداد (HTTP ${res.status})`)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-4 space-y-2 text-sm">
+        <p className="font-medium text-emerald-700 dark:text-emerald-300">
+          ✅ الطريقة الموصى بها — لا توجد مشاكل SSL أو IP أو TLS
+        </p>
+        <p className="text-xs text-emerald-600 dark:text-emerald-400">
+          Data API يعمل عبر HTTPS فقط (مثل REST API)، لا يحتاج driver أو TCP، يعمل من أي مكان.
+        </p>
+      </div>
+
+      <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm">
+        <p className="font-medium">📋 الخطوات:</p>
+        <ol className="list-decimal list-inside space-y-1 text-xs text-muted-foreground mr-2">
+          <li>في MongoDB Atlas: اختر Cluster0 → تبويب <b>Data API</b></li>
+          <li>اضغط <b>Enable Data API</b> (يستغرق ثانية)</li>
+          <li>انسخ الـ <b>URL</b> الذي يظهر (ينتهي بـ <code className="bg-background px-1 rounded">/endpoint/data/v1</code>)</li>
+          <li>اضغط <b>Create API Key</b> → انسخ الـ key (يظهر مرة واحدة فقط!)</li>
+          <li>الصق الـ URL والـ Key أدناه واضغط الزر</li>
+        </ol>
+      </div>
+
+      <form onSubmit={submit} className="space-y-3">
+        <div className="space-y-2">
+          <Label htmlFor="apiUrl">Data API URL</Label>
+          <Input
+            id="apiUrl"
+            value={apiUrl}
+            onChange={(e) => setApiUrl(e.target.value)}
+            placeholder="https://data.mongodb-api.com/app/xxx-yyy/endpoint/data/v1"
+            className="font-mono text-xs"
+            required
+            dir="ltr"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="apiKey">API Key</Label>
+          <Input
+            id="apiKey"
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            className="font-mono text-xs"
+            required
+            dir="ltr"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label htmlFor="dataSource">Data Source</Label>
+            <Input
+              id="dataSource"
+              value={dataSource}
+              onChange={(e) => setDataSource(e.target.value)}
+              placeholder="Cluster0"
+              className="text-xs"
+              dir="ltr"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="database">Database</Label>
+            <Input
+              id="database"
+              value={database}
+              onChange={(e) => setDatabase(e.target.value)}
+              placeholder="attendance_db"
+              className="text-xs"
+              dir="ltr"
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span className="break-all whitespace-pre-wrap">{error}</span>
+          </div>
+        )}
+
+        {result && (
+          <div className="rounded-lg bg-muted p-3">
+            <div className="text-xs font-medium mb-2">النتيجة:</div>
+            <pre className="text-[10px] overflow-x-auto whitespace-pre-wrap break-all" dir="ltr">
+              {JSON.stringify(result, null, 2)}
+            </pre>
+          </div>
+        )}
+
+        <Button type="submit" className="w-full" disabled={loading || !apiUrl.trim() || !apiKey.trim()}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Database className="w-4 h-4 ml-2" />}
+          إعداد قاعدة البيانات + إنشاء المدير
+        </Button>
+      </form>
+    </div>
+  )
+}
+
+/* -------- Driver Setup Form (the original method, kept as fallback) -------- */
+function DriverSetupForm({ onSetupComplete }: { onSetupComplete: () => void }) {
   const [dbUrl, setDbUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<unknown>(null)
   const [error, setError] = useState('')
-  const [envStatus, setEnvStatus] = useState<unknown>(null)
-
-  // Check if Vercel env var is already set (uses fast endpoint, no DB call)
-  useEffect(() => {
-    fetch('/api/health-simple', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((data) => setEnvStatus(data))
-      .catch(() => {})
-  }, [])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -446,7 +626,7 @@ function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ databaseUrl: dbUrl.trim() }),
       })
-      const data = await res.json().catch(() => ({ error: 'استجابة غير صالحة (قد يكون الـ server قد تجمد)' }))
+      const data = await res.json().catch(() => ({ error: 'استجابة غير صالحة' }))
       setResult({ httpStatus: res.status, data })
       if (res.ok && data.success) {
         toast.success('تم إعداد قاعدة البيانات بنجاح!', {
@@ -455,7 +635,7 @@ function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void 
         })
         setTimeout(() => onSetupComplete(), 2500)
       } else {
-        setError(data.error || data.details || `فشل الإعداد (HTTP ${res.status})`)
+        setError(data.error || `فشل الإعداد (HTTP ${res.status})`)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -465,100 +645,58 @@ function DatabaseSetupScreen({ onSetupComplete }: { onSetupComplete: () => void 
   }
 
   return (
-    <div className="max-w-2xl mx-auto pt-2">
-      <Card className="shadow-xl border-amber-500/30">
-        <CardHeader className="text-center space-y-3 pb-6">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center">
-            <Database className="w-8 h-8 text-amber-600" />
+    <div className="space-y-4">
+      <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3 text-xs text-amber-700 dark:text-amber-300">
+        ⚠️ هذه الطريقة قد تواجه مشاكل SSL أو IP على Vercel. يُنصح باستخدام Data API بدلاً منها.
+      </div>
+
+      <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm">
+        <p className="font-medium">📋 الخطوات:</p>
+        <ol className="list-decimal list-inside space-y-1 text-xs text-muted-foreground mr-2">
+          <li>أنشئ cluster M0 Free على MongoDB Atlas</li>
+          <li>من <b>Database Access</b>: أنشئ user</li>
+          <li>من <b>Network Access</b>: اختر <code className="bg-background px-1 rounded">Allow Access From Anywhere</code> (<code>0.0.0.0/0</code>)</li>
+          <li>من <b>Database → Connect → Drivers</b>: انسخ connection string</li>
+          <li>استبدل <code className="bg-background px-1 rounded">&lt;db_password&gt;</code> بكلمة المرور</li>
+          <li>أضف <code className="bg-background px-1 rounded">/attendance_db</code> قبل <code className="bg-background px-1 rounded">?</code></li>
+        </ol>
+      </div>
+
+      <form onSubmit={submit} className="space-y-3">
+        <div className="space-y-2">
+          <Label htmlFor="dbUrl">MongoDB Connection String</Label>
+          <textarea
+            id="dbUrl"
+            value={dbUrl}
+            onChange={(e) => setDbUrl(e.target.value)}
+            placeholder="mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/attendance_db?retryWrites=true&w=majority"
+            className="font-mono text-xs min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2"
+            required
+            dir="ltr"
+          />
+        </div>
+
+        {error && (
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span className="break-all">{error}</span>
           </div>
-          <div>
-            <CardTitle className="text-2xl">إعداد قاعدة البيانات</CardTitle>
-            <CardDescription className="mt-1">
-              لم يتم العثور على <code className="bg-muted px-1 py-0.5 rounded text-xs">DATABASE_URL</code>.
-              اربط قاعدة بيانات MongoDB لتفعيل النظام.
-            </CardDescription>
+        )}
+
+        {result && (
+          <div className="rounded-lg bg-muted p-3">
+            <div className="text-xs font-medium mb-2">النتيجة:</div>
+            <pre className="text-[10px] overflow-x-auto whitespace-pre-wrap break-all" dir="ltr">
+              {JSON.stringify(result, null, 2)}
+            </pre>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Env var status indicator */}
-          {envStatus && (
-            <div className={`rounded-lg p-3 text-sm ${(envStatus as { status: string }).status === 'ok' ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300'}`}>
-              <div className="font-medium mb-1">
-                {(envStatus as { status: string }).status === 'ok' ? '✅ DATABASE_URL مضبوط في Vercel' : '⚠️ DATABASE_URL غير مضبوط'}
-              </div>
-              <div className="text-xs">
-                {(envStatus as { urlValidation?: { hint?: string } }).urlValidation?.hint}
-              </div>
-            </div>
-          )}
+        )}
 
-          {/* Instructions */}
-          <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm">
-            <p className="font-medium">📋 الخطوات:</p>
-            <ol className="list-decimal list-inside space-y-1 text-xs text-muted-foreground mr-2">
-              <li>أنشئ حساب مجاني على <a href="https://www.mongodb.com/cloud/atlas/register" target="_blank" rel="noreferrer" className="text-primary hover:underline">MongoDB Atlas</a></li>
-              <li>أنشئ cluster من نوع <b>M0 Free</b></li>
-              <li>من <b>Database Access</b>: أنشئ user باسم وكلمة مرور</li>
-              <li>من <b>Network Access</b>: اختر <code className="bg-background px-1 rounded">Allow Access From Anywhere</code></li>
-              <li>من <b>Database → Connect → Drivers</b>: انسخ connection string</li>
-              <li>استبدل <code className="bg-background px-1 rounded">&lt;db_password&gt;</code> بكلمة المرور الحقيقية</li>
-              <li>أضف <code className="bg-background px-1 rounded">/attendance_db</code> قبل <code className="bg-background px-1 rounded">?</code> في الـ URL</li>
-            </ol>
-          </div>
-
-          <form onSubmit={submit} className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="dbUrl">MongoDB Connection String</Label>
-              <textarea
-                id="dbUrl"
-                value={dbUrl}
-                onChange={(e) => setDbUrl(e.target.value)}
-                placeholder="mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/attendance_db?retryWrites=true&w=majority"
-                className="font-mono text-xs min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2"
-                required
-                dir="ltr"
-              />
-              <p className="text-xs text-muted-foreground">
-                مثال: <code dir="ltr" className="bg-muted px-1 rounded">mongodb+srv://user:pass@cluster0.abcde.mongodb.net/attendance_db?retryWrites=true&amp;w=majority</code>
-              </p>
-            </div>
-
-            {error && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span className="break-all">{error}</span>
-              </div>
-            )}
-
-            {result && (
-              <div className="rounded-lg bg-muted p-3">
-                <div className="text-xs font-medium mb-2">النتيجة:</div>
-                <pre className="text-[10px] overflow-x-auto whitespace-pre-wrap break-all" dir="ltr">
-                  {JSON.stringify(result, null, 2)}
-                </pre>
-              </div>
-            )}
-
-            <Button type="submit" className="w-full" disabled={loading || !dbUrl.trim()}>
-              {loading ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Database className="w-4 h-4 ml-2" />}
-              إعداد قاعدة البيانات + إنشاء المدير الافتراضي
-            </Button>
-          </form>
-
-          <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-3 text-xs text-emerald-700 dark:text-emerald-300">
-            <p className="font-medium mb-1">✅ بعد نجاح الإعداد:</p>
-            <ol className="list-decimal list-inside space-y-1 mr-2">
-              <li>سجّل الدخول بـ: <code className="bg-background px-1 rounded">ADMIN001</code> / <code className="bg-background px-1 rounded">admin123</code></li>
-              <li>للاستخدام الدائم: أضف نفس الـ URL إلى Vercel Environment Variables باسم <code className="bg-background px-1 rounded">DATABASE_URL</code></li>
-            </ol>
-          </div>
-        </CardContent>
-        <CardFooter className="justify-center">
-          <Button variant="ghost" size="sm" onClick={onSetupComplete}>
-            تخطي (سجّل الدخول فقط)
-          </Button>
-        </CardFooter>
-      </Card>
+        <Button type="submit" className="w-full" disabled={loading || !dbUrl.trim()}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Database className="w-4 h-4 ml-2" />}
+          إعداد قاعدة البيانات
+        </Button>
+      </form>
     </div>
   )
 }
