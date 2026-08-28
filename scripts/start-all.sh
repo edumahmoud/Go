@@ -1,6 +1,7 @@
 #!/bin/bash
 # Starts all required backend services for the attendance tracking app.
 # This script is idempotent: it only starts services that are not already running.
+# It also seeds a default MANAGER account (ADMIN001 / admin123) on first run.
 
 set -e
 
@@ -21,6 +22,10 @@ if ! pgrep -f "mongod.*--port 27017" > /dev/null; then
 else
   echo "[startup] MongoDB already running."
 fi
+
+# 1b. Seed default admin account (idempotent — skips if ADMIN001 already exists)
+echo "[startup] Ensuring default admin account exists..."
+node /home/z/my-project/scripts/seed-admin.js 2>&1 | sed 's/^/[startup] /'
 
 # 2. Realtime WebSocket service
 if ! pgrep -f "bun.*index.ts.*realtime\|realtime.*index.ts\|3003" > /dev/null 2>&1 || ! ss -tnlp 2>/dev/null | grep -q ":3003"; then
@@ -50,3 +55,8 @@ echo "Status:"
 echo "  MongoDB: $(pgrep -f 'mongod.*27017' > /dev/null && echo 'running' || echo 'not running')"
 echo "  Realtime: $(ss -tnlp 2>/dev/null | grep -q ':3003' && echo 'running' || echo 'not running')"
 echo "  Next.js:  $(pgrep -f 'next dev' > /dev/null && echo 'running' || echo 'not running')"
+echo ""
+echo "Default admin login:"
+echo "  Code:     ADMIN001"
+echo "  Password: admin123"
+echo "  URL:      http://localhost:3000"
