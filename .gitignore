@@ -82,3 +82,6 @@ Thumbs.db
 !mini-services/realtime-service/package.json
 !mini-services/realtime-service/index.ts
 !mini-services/realtime-service/start.sh
+
+# User-uploaded files (not part of source)
+/upload/
